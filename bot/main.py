@@ -8,10 +8,9 @@ URL_2 = os.getenv("URL_2")
 
 app = Flask(__name__)
 
-# Replace with your actual Discord webhook URLs
 DISCORD_WEBHOOKS = {
-    "commits": "YOUR_DISCORD_WEBHOOK_URL_1",
-    "pull_requests": "YOUR_DISCORD_WEBHOOK_URL_2",
+    "commits": f"{URL_1}",
+    "pull_requests": f"{URL_2}",
 }
 
 @app.route("/github", methods=["POST"])
