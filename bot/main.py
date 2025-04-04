@@ -48,4 +48,4 @@ def send_to_discord(webhook_url, message):
     requests.post(webhook_url, json=data)
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=3535)
+    app.run(host="0.0.0.0", port=5000)
