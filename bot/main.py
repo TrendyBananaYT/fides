@@ -3,16 +3,17 @@ from discord.ext import commands
 from flask import Flask, request, jsonify
 import os
 from threading import Thread
+import datetime
 
-# Get your Discord bot token and channel IDs from environment variables
+# Environment variables and channel/role IDs
 DISCORD_TOKEN = os.getenv("FIDES_TOKEN")
-COMMITS_CHANNEL_ID = 1357567489126568066  # Channel ID for commits
+COMMITS_CHANNEL_ID = 1357567489126568066       # Channel ID for commits
 PULL_REQUESTS_CHANNEL_ID = 1357567373250658347  # Channel ID for pull requests
-ROLE_ID = 1357602019266789437  # Role ID to mention
+ROLE_ID = 1357602019266789437                   # Role ID to mention
 
 app = Flask(__name__)
 
-# Initialize bot
+# Initialize bot with default intents
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
@@ -20,60 +21,76 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 async def on_ready():
     print(f'Logged in as {bot.user}')
 
-# Flask route to handle GitHub webhook (synchronous)
+# Synchronous Flask route (using bot.loop.create_task for async calls)
 @app.route("/github", methods=["POST"])
 def github_webhook():
     data = request.json
 
-    # Handle push events (commits)
+    # Handle commit events (push)
     if "commits" in data:
         for commit in data["commits"]:
-            message = (
-                f"📌 **New Commit in {data['repository']['full_name']}**\n"
-                f"📝 **Message:** {commit['message']}\n"
-                f"👤 **Author:** {commit['author']['name']}\n"
-                f"🔗 [View Commit]({commit['url']})"
+            repository = data["repository"]["full_name"]
+            commit_message = commit["message"]
+            commit_author = commit["author"]["name"]
+            commit_url = commit["url"]
+            log_details = (
+                f"Repository: {repository}\n"
+                f"Author: {commit_author}\n"
+                f"Message: {commit_message}\n"
+                f"Commit URL: {commit_url}\n"
+                f"Timestamp: {datetime.datetime.utcnow().isoformat()} UTC"
             )
-            # Schedule the async Discord call
-            bot.loop.create_task(send_message_to_discord(message, COMMITS_CHANNEL_ID))
+            bot.loop.create_task(send_message_to_discord(
+                event_type="Commit",
+                log_details=log_details,
+                channel_id=COMMITS_CHANNEL_ID
+            ))
 
     # Handle pull request events
     if "pull_request" in data:
         pr = data["pull_request"]
-        message = (
-            f"📌 **New Pull Request in {data['repository']['full_name']}**\n"
-            f"📝 **Title:** {pr['title']}\n"
-            f"👤 **Opened by:** {pr['user']['login']}\n"
-            f"🔗 [View Pull Request]({pr['html_url']})"
+        repository = data["repository"]["full_name"]
+        pr_title = pr["title"]
+        pr_author = pr["user"]["login"]
+        pr_url = pr["html_url"]
+        log_details = (
+            f"Repository: {repository}\n"
+            f"Title: {pr_title}\n"
+            f"Opened by: {pr_author}\n"
+            f"PR URL: {pr_url}\n"
+            f"Timestamp: {datetime.datetime.utcnow().isoformat()} UTC"
         )
-        # Schedule the async Discord call
-        bot.loop.create_task(send_message_to_discord(message, PULL_REQUESTS_CHANNEL_ID))
+        bot.loop.create_task(send_message_to_discord(
+            event_type="Pull Request",
+            log_details=log_details,
+            channel_id=PULL_REQUESTS_CHANNEL_ID
+        ))
 
     return jsonify({"status": "success"}), 200
 
-# Asynchronous function to send message to Discord with embeds
-async def send_message_to_discord(message, channel_id):
+# Asynchronous function to send the detailed embed to Discord
+async def send_message_to_discord(event_type, log_details, channel_id):
     channel = bot.get_channel(channel_id)
-    if channel:
-        print(f"Sending message to channel {channel_id} ({channel.name})")  # Debug log
-        # Create embed message
-        embed = discord.Embed(
-            title="GitHub Notification",
-            description=message,
-            color=discord.Color.blue()
-        )
-        embed.set_footer(text="GitHub Webhook")
-        
-        # Create the mention for the role
-        role_mention = f"<@&{ROLE_ID}>"
-        
-        # Send the message to the channel
-        await channel.send(content=role_mention, embed=embed)
-    else:
-        print(f"Channel with ID {channel_id} not found.")
+    if channel is None:
+        print(f"Channel with ID {channel_id} not found!")
+        return
 
+    embed = discord.Embed(
+        title=f"New GitHub {event_type} Notification",
+        description="Below is the detailed log of the event:",
+        color=discord.Color.blurple(),
+        timestamp=datetime.datetime.utcnow()
+    )
+    embed.add_field(name="Details", value=f"```{log_details}```", inline=False)
+    embed.set_footer(text="GitHub Webhook")
 
-# Start the Flask app in a separate thread
+    await channel.send(
+        embed=embed,
+        content=f"<@&{ROLE_ID}>",
+        allowed_mentions=discord.AllowedMentions(roles=True)
+    )
+
+# Run the Flask app in a separate thread
 def start_flask():
     app.run(host="0.0.0.0", port=5000)
 
