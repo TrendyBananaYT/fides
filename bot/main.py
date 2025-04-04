@@ -54,11 +54,11 @@ def github_webhook():
         pr_author = pr["user"]["login"]
         pr_url = pr["html_url"]
         log_details = f'''
-            Repository: {repository}\n"
-            Title: {pr_title}\n"
-            Opened by: {pr_author}\n"
-            PR URL: {pr_url}\n"
-            Timestamp: {datetime.now(timezone.utc).isoformat()} UT
+Repository: {repository}\n"
+Title: {pr_title}\n"
+Opened by: {pr_author}\n"
+PR URL: {pr_url}\n"
+Timestamp: {datetime.now(timezone.utc).isoformat()} UT
         '''
 
         bot.loop.create_task(send_message_to_discord(
@@ -82,7 +82,7 @@ async def send_message_to_discord(event_type, log_details, channel_id):
         color=discord.Color.blurple(),
         timestamp=datetime.now(timezone.utc)
     )
-    embed.add_field(name="Details", value=f"```{log_details}```", inline=False)
+    embed.add_field(name="Details", value=log_details, inline=False)
     embed.set_footer(text="GitHub Webhook")
 
     await channel.send(
