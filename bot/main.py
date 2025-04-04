@@ -29,16 +29,30 @@ def github_webhook():
     # Handle commit events (push)
     if "commits" in data:
         for commit in data["commits"]:
-            repository = data["repository"]["full_name"]
+            repository_name = data["repository"]["full_name"]
+            repository_url = data["repository"].get("html_url", "")
+            # Format repository as a clickable link
+            repo_link = f"[{repository_name}]({repository_url})" if repository_url else repository_name
+
             commit_message = commit["message"]
-            commit_author = commit["author"]["name"]
             commit_url = commit["url"]
+            # Format commit URL as a shortened link
+            commit_link = f"[View Commit]({commit_url})"
+            
+            # For commit author, use username if available
+            if commit["author"].get("username"):
+                author_link = f"[{commit['author']['name']}](https://github.com/{commit['author']['username']})"
+            else:
+                author_link = commit["author"]["name"]
+
+            timestamp = datetime.now(timezone.utc).isoformat() + " UTC"
+
             log_details = (
-                f"Repository: {repository}\n"
-                f"Author: {commit_author}\n"
-                f"Message: {commit_message}\n"
-                f"Commit URL: {commit_url}\n"
-                f"Timestamp: {datetime.now(timezone.utc).isoformat()} UTC"
+                f"**Repository:** {repo_link}\n"
+                f"**Author:** {author_link}\n"
+                f"**Message:** {commit_message}\n"
+                f"**Commit:** {commit_link}\n"
+                f"**Timestamp:** {timestamp}"
             )
             bot.loop.create_task(send_message_to_discord(
                 event_type="Commit",
@@ -49,18 +63,26 @@ def github_webhook():
     # Handle pull request events
     if "pull_request" in data:
         pr = data["pull_request"]
-        repository = data["repository"]["full_name"]
-        pr_title = pr["title"]
-        pr_author = pr["user"]["login"]
-        pr_url = pr["html_url"]
-        log_details = f'''
-Repository: {repository}\n"
-Title: {pr_title}\n"
-Opened by: {pr_author}\n"
-PR URL: {pr_url}\n"
-Timestamp: {datetime.now(timezone.utc).isoformat()} UT
-        '''
+        repository_name = data["repository"]["full_name"]
+        repository_url = data["repository"].get("html_url", "")
+        repo_link = f"[{repository_name}]({repository_url})" if repository_url else repository_name
 
+        pr_title = pr["title"]
+        pr_url = pr["html_url"]
+        pr_link = f"[View PR]({pr_url})"
+        pr_author = pr["user"]["login"]
+        pr_author_url = pr["user"].get("html_url", f"https://github.com/{pr_author}")
+        author_link = f"[{pr_author}]({pr_author_url})"
+
+        timestamp = datetime.now(timezone.utc).isoformat() + " UTC"
+
+        log_details = (
+            f"**Repository:** {repo_link}\n"
+            f"**Title:** {pr_title}\n"
+            f"**Opened by:** {author_link}\n"
+            f"**PR:** {pr_link}\n"
+            f"**Timestamp:** {timestamp}"
+        )
         bot.loop.create_task(send_message_to_discord(
             event_type="Pull Request",
             log_details=log_details,
@@ -77,12 +99,13 @@ async def send_message_to_discord(event_type, log_details, channel_id):
         return
 
     embed = discord.Embed(
-        title=f"New GitHub {event_type} Notification",
-        description="Below is the detailed log of the event:",
+        title=f"🔔 New GitHub {event_type} Notification",
+        description="A GitHub event has been triggered. Details are shown below:",
         color=discord.Color.blurple(),
         timestamp=datetime.now(timezone.utc)
     )
-    embed.add_field(name="Details", value=log_details, inline=False)
+    # Add a field with the detailed log formatted as a code block for clarity
+    embed.add_field(name="Event Details", value=f"```{log_details}```", inline=False)
     embed.set_footer(text="GitHub Webhook")
 
     await channel.send(
