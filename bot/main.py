@@ -52,7 +52,7 @@ def github_webhook():
     return jsonify({"status": "success"}), 200
 
 # Function to send message to Discord with embeds
-def send_message_to_discord(message, channel_id):
+async def send_message_to_discord(message, channel_id):
     """Send a formatted message with embed to Discord."""
     channel = bot.get_channel(channel_id)
     
@@ -65,7 +65,7 @@ def send_message_to_discord(message, channel_id):
         role_mention = f"<@&{ROLE_ID}>"
         
         # Send the message to the channel
-        channel.send(content=role_mention, embed=embed)
+        await channel.send(content=role_mention, embed=embed)
 
 # Start the Flask app in a separate thread
 def start_flask():
