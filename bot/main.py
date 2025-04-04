@@ -24,7 +24,7 @@ async def on_ready():
 
 # Flask route to handle GitHub webhook
 @app.route("/github", methods=["POST"])
-def github_webhook():
+async def github_webhook():
     data = request.json
     
     # Handle push events (commits)
@@ -36,7 +36,7 @@ def github_webhook():
                 f"👤 **Author:** {commit['author']['name']}\n"
                 f"🔗 [View Commit]({commit['url']})"
             )
-            send_message_to_discord(message, COMMITS_CHANNEL_ID)
+            await send_message_to_discord(message, COMMITS_CHANNEL_ID)
 
     # Handle pull request events
     if "pull_request" in data:
@@ -47,7 +47,7 @@ def github_webhook():
             f"👤 **Opened by:** {pr['user']['login']}\n"
             f"🔗 [View Pull Request]({pr['html_url']})"
         )
-        send_message_to_discord(message, PULL_REQUESTS_CHANNEL_ID)
+        await send_message_to_discord(message, PULL_REQUESTS_CHANNEL_ID)
 
     return jsonify({"status": "success"}), 200
 
