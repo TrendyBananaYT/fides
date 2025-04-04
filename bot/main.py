@@ -3,7 +3,7 @@ from discord.ext import commands
 from flask import Flask, request, jsonify
 import os
 from threading import Thread
-import datetime
+from datetime import datetime, timezone
 
 # Environment variables and channel/role IDs
 DISCORD_TOKEN = os.getenv("FIDES_TOKEN")
@@ -38,7 +38,7 @@ def github_webhook():
                 f"Author: {commit_author}\n"
                 f"Message: {commit_message}\n"
                 f"Commit URL: {commit_url}\n"
-                f"Timestamp: {datetime.datetime.utcnow().isoformat()} UTC"
+                f"Timestamp: {datetime.now(timezone.utc).isoformat()} UTC"
             )
             bot.loop.create_task(send_message_to_discord(
                 event_type="Commit",
@@ -53,13 +53,14 @@ def github_webhook():
         pr_title = pr["title"]
         pr_author = pr["user"]["login"]
         pr_url = pr["html_url"]
-        log_details = (
-            f"Repository: {repository}\n"
-            f"Title: {pr_title}\n"
-            f"Opened by: {pr_author}\n"
-            f"PR URL: {pr_url}\n"
-            f"Timestamp: {datetime.datetime.utcnow().isoformat()} UTC"
-        )
+        log_details = f'''
+            Repository: {repository}\n"
+            Title: {pr_title}\n"
+            Opened by: {pr_author}\n"
+            PR URL: {pr_url}\n"
+            Timestamp: {datetime.datetime.utcnow().isoformat()} UT
+        '''
+
         bot.loop.create_task(send_message_to_discord(
             event_type="Pull Request",
             log_details=log_details,
