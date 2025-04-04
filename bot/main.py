@@ -5,7 +5,6 @@ import os
 URL_1 = os.getenv("URL_1")
 URL_2 = os.getenv("URL_2")
 
-
 app = Flask(__name__)
 
 DISCORD_WEBHOOKS = {
