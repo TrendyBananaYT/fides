@@ -21,6 +21,11 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 async def on_ready():
     print(f'Logged in as {bot.user}')
 
+def get_discord_timestamp(dt: datetime) -> str:
+    """Converts a datetime object to a Discord timestamp string."""
+    unix_time = int(dt.timestamp())
+    return f"<t:{unix_time}:F>"
+
 # Synchronous Flask route (using bot.loop.create_task for async calls)
 @app.route("/github", methods=["POST"])
 def github_webhook():
@@ -45,14 +50,15 @@ def github_webhook():
             else:
                 author_link = commit["author"]["name"]
 
-            timestamp = datetime.now(timezone.utc).isoformat() + " UTC"
+            now = datetime.now(timezone.utc)
+            discord_ts = get_discord_timestamp(now)
 
             log_details = (
-                f"**Repository:** {repo_link}\n"
-                f"**Author:** {author_link}\n"
-                f"**Message:** {commit_message}\n"
-                f"**Commit:** {commit_link}\n"
-                f"**Timestamp:** {timestamp}"
+                f"**Repository:** {repo_link}\n\n"
+                f"**Author:** {author_link}\n\n"
+                f"**Message:** {commit_message}\n\n"
+                f"**Commit:** {commit_link}\n\n"
+                f"**Timestamp:** {discord_ts}"
             )
             bot.loop.create_task(send_message_to_discord(
                 event_type="Commit",
@@ -74,14 +80,15 @@ def github_webhook():
         pr_author_url = pr["user"].get("html_url", f"https://github.com/{pr_author}")
         author_link = f"[{pr_author}]({pr_author_url})"
 
-        timestamp = datetime.now(timezone.utc).isoformat() + " UTC"
+        now = datetime.now(timezone.utc)
+        discord_ts = get_discord_timestamp(now)
 
         log_details = (
-            f"**Repository:** {repo_link}\n"
-            f"**Title:** {pr_title}\n"
-            f"**Opened by:** {author_link}\n"
-            f"**PR:** {pr_link}\n"
-            f"**Timestamp:** {timestamp}"
+            f"**Repository:** {repo_link}\n\n"
+            f"**Title:** {pr_title}\n\n"
+            f"**Opened by:** {author_link}\n\n"
+            f"**PR:** {pr_link}\n\n"
+            f"**Timestamp:** {discord_ts}"
         )
         bot.loop.create_task(send_message_to_discord(
             event_type="Pull Request",
@@ -100,12 +107,12 @@ async def send_message_to_discord(event_type, log_details, channel_id):
 
     embed = discord.Embed(
         title=f"🔔 New GitHub {event_type} Notification",
-        description="A GitHub event has been triggered. Details are shown below:",
-        color=discord.Color.blurple(),
+        description="A GitHub event has been triggered. See details below:",
+        color=discord.Color.brand_green(),
         timestamp=datetime.now(timezone.utc)
     )
-    # Add a field with the detailed log formatted as a code block for clarity
-    embed.add_field(name="Event Details", value=f"{log_details}", inline=False)
+    # Add a field with the detailed log formatted for clarity
+    embed.add_field(name="Event Details", value=log_details, inline=False)
     embed.set_footer(text="GitHub Webhook")
 
     await channel.send(
