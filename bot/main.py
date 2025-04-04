@@ -80,7 +80,7 @@ async def send_message_to_discord(event_type, log_details, channel_id):
         title=f"New GitHub {event_type} Notification",
         description="Below is the detailed log of the event:",
         color=discord.Color.blurple(),
-        timestamp=datetime.now(timezone.utc).isoformat()
+        timestamp=datetime.now(timezone.utc)
     )
     embed.add_field(name="Details", value=f"```{log_details}```", inline=False)
     embed.set_footer(text="GitHub Webhook")
