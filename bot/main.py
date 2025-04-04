@@ -105,7 +105,7 @@ async def send_message_to_discord(event_type, log_details, channel_id):
         timestamp=datetime.now(timezone.utc)
     )
     # Add a field with the detailed log formatted as a code block for clarity
-    embed.add_field(name="Event Details", value=f"```{log_details}```", inline=False)
+    embed.add_field(name="Event Details", value=f"{log_details}", inline=False)
     embed.set_footer(text="GitHub Webhook")
 
     await channel.send(
