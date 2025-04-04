@@ -21,7 +21,7 @@ def github_webhook():
     if "commits" in data:
         for commit in data["commits"]:
             message = (
-                f"📌 **New Commit in {data['repository']['full_name']}**\n"
+                f"📌 **New Commit In {data['repository']['full_name']}**\n"
                 f"📝 **Message:** {commit['message']}\n"
                 f"👤 **Author:** {commit['author']['name']}\n"
                 f"🔗 [View Commit]({commit['url']})"
