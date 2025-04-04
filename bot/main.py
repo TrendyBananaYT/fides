@@ -55,6 +55,7 @@ def github_webhook():
 async def send_message_to_discord(message, channel_id):
     channel = bot.get_channel(channel_id)
     if channel:
+        print(f"Sending message to channel {channel_id} ({channel.name})")  # Debug log
         # Create embed message
         embed = discord.Embed(
             title="GitHub Notification",
@@ -70,6 +71,7 @@ async def send_message_to_discord(message, channel_id):
         await channel.send(content=role_mention, embed=embed)
     else:
         print(f"Channel with ID {channel_id} not found.")
+
 
 # Start the Flask app in a separate thread
 def start_flask():
