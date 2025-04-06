@@ -4,12 +4,43 @@ from flask import Flask, request, jsonify
 import os
 from threading import Thread
 from datetime import datetime, timezone
+import requests
+import json
+import io
 
 # Environment variables and channel/role IDs
 DISCORD_TOKEN = os.getenv("FIDES_TOKEN")
 COMMITS_CHANNEL_ID = 1357567489126568066       # Channel ID for commits
 PULL_REQUESTS_CHANNEL_ID = 1357567373250658347  # Channel ID for pull requests
 ROLE_ID = 1357602019266789437                   # Role ID to mention
+
+# Global default owner (used if a server hasn't set its owner)
+default_owner = "TrendyBananaYT"
+owners_file = os.path.join(".", "owners.json")
+owners_data = {}
+
+# Load owners from JSON file at startup
+def load_owners():
+    global owners_data
+    if os.path.exists(owners_file):
+        with open(owners_file, "r") as f:
+            try:
+                owners_data = json.load(f)
+                print(f"Loaded owners data from {owners_file}: {owners_data}")
+            except json.JSONDecodeError:
+                print("Error decoding JSON; starting with an empty owners dictionary.")
+                owners_data = {}
+    else:
+        owners_data = {}
+
+# Save owners data to JSON file
+def save_owners():
+    with open(owners_file, "w") as f:
+        json.dump(owners_data, f, indent=4)
+    print(f"Owners data saved to {owners_file}")
+    print(f"Current owners data: {owners_data}")
+
+load_owners()
 
 app = Flask(__name__)
 
@@ -20,13 +51,16 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 @bot.event
 async def on_ready():
     print(f'Logged in as {bot.user}')
+    try:
+        synced = await bot.tree.sync()
+        print(f"Synced {len(synced)} commands.")
+    except Exception as e:
+        print(e)
 
 def get_discord_timestamp(dt: datetime) -> str:
-    """Converts a datetime object to a Discord timestamp string."""
     unix_time = int(dt.timestamp())
     return f"<t:{unix_time}:F>"
 
-# Synchronous Flask route (using bot.loop.create_task for async calls)
 @app.route("/github", methods=["POST"])
 def github_webhook():
     data = request.json
@@ -36,15 +70,12 @@ def github_webhook():
         for commit in data["commits"]:
             repository_name = data["repository"]["full_name"]
             repository_url = data["repository"].get("html_url", "")
-            # Format repository as a clickable link
             repo_link = f"[{repository_name}]({repository_url})" if repository_url else repository_name
 
             commit_message = commit["message"]
             commit_url = commit["url"]
-            # Format commit URL as a shortened link
             commit_link = f"[View Commit]({commit_url})"
             
-            # For commit author, use username if available
             if commit["author"].get("username"):
                 author_link = f"[{commit['author']['name']}](https://github.com/{commit['author']['username']})"
             else:
@@ -69,6 +100,8 @@ def github_webhook():
     # Handle pull request events
     if "pull_request" in data:
         pr = data["pull_request"]
+        action = data.get("action")
+        merged = pr.get("merged", False)
         repository_name = data["repository"]["full_name"]
         repository_url = data["repository"].get("html_url", "")
         repo_link = f"[{repository_name}]({repository_url})" if repository_url else repository_name
@@ -83,22 +116,35 @@ def github_webhook():
         now = datetime.now(timezone.utc)
         discord_ts = get_discord_timestamp(now)
 
-        log_details = (
-            f"**Repository:** {repo_link}\n\n"
-            f"**Title:** {pr_title}\n\n"
-            f"**Opened by:** {author_link}\n\n"
-            f"**PR:** {pr_link}\n\n"
-            f"**Timestamp:** {discord_ts}"
-        )
-        bot.loop.create_task(send_message_to_discord(
-            event_type="Pull Request",
-            log_details=log_details,
-            channel_id=PULL_REQUESTS_CHANNEL_ID
-        ))
+        if action == "closed" and merged:
+            log_details = (
+                f"**Repository:** {repo_link}\n\n"
+                f"**Title:** {pr_title}\n\n"
+                f"**Merged by:** {author_link}\n\n"
+                f"**PR:** {pr_link}\n\n"
+                f"**Timestamp:** {discord_ts}"
+            )
+            bot.loop.create_task(send_message_to_discord(
+                event_type="Merge",
+                log_details=log_details,
+                channel_id=COMMITS_CHANNEL_ID
+            ))
+        else:
+            log_details = (
+                f"**Repository:** {repo_link}\n\n"
+                f"**Title:** {pr_title}\n\n"
+                f"**Opened by:** {author_link}\n\n"
+                f"**PR:** {pr_link}\n\n"
+                f"**Timestamp:** {discord_ts}"
+            )
+            bot.loop.create_task(send_message_to_discord(
+                event_type="Pull Request",
+                log_details=log_details,
+                channel_id=PULL_REQUESTS_CHANNEL_ID
+            ))
 
     return jsonify({"status": "success"}), 200
 
-# Asynchronous function to send the detailed embed to Discord
 async def send_message_to_discord(event_type, log_details, channel_id):
     channel = bot.get_channel(channel_id)
     if channel is None:
@@ -111,7 +157,6 @@ async def send_message_to_discord(event_type, log_details, channel_id):
         color=discord.Color.brand_green(),
         timestamp=datetime.now(timezone.utc)
     )
-    # Add a field with the detailed log formatted for clarity
     embed.add_field(name="Event Details", value=log_details, inline=False)
     embed.set_footer(text="GitHub Webhook")
 
@@ -120,6 +165,161 @@ async def send_message_to_discord(event_type, log_details, channel_id):
         content=f"<@&{ROLE_ID}>",
         allowed_mentions=discord.AllowedMentions(roles=True)
     )
+
+# ===============================
+# Slash Command: /setowner
+# ===============================
+@bot.tree.command(name="setowner", description="Set the repository owner for this server")
+async def setowner(interaction: discord.Interaction, owner_name: str):
+    guild_id = str(interaction.guild.id)
+    owners_data[guild_id] = owner_name
+    save_owners()
+    await interaction.response.send_message(f"Owner set to `{owner_name}` for this server.", ephemeral=True)
+
+# -------------------------------
+# Commit Paginator and Selector
+# -------------------------------
+
+class CommitSelectView(discord.ui.View):
+    def __init__(self, commits, owner, repo):
+        super().__init__(timeout=180)
+        self.commits = commits
+        self.owner = owner
+        self.repo = repo
+
+        # Build options for up to 25 commits (Discord limit)
+        options = []
+        for i, commit in enumerate(commits[:25]):
+            short_sha = commit["sha"][:7]
+            message = commit["commit"]["message"].splitlines()[0]
+            # Limit description to 50 characters
+            description = message if len(message) <= 50 else message[:47] + "..."
+            options.append(discord.SelectOption(label=short_sha, description=description, value=str(i)))
+        
+        # Create a select menu with the options and add it to the view.
+        select_menu = discord.ui.Select(
+            placeholder="Select a commit to view its details...",
+            min_values=1,
+            max_values=1,
+            options=options,
+            custom_id="commit_select"
+        )
+        select_menu.callback = self.select_callback
+        self.add_item(select_menu)
+
+    def get_embed(self, index: int) -> discord.Embed:
+        commit = self.commits[index]
+        short_sha = commit["sha"][:7]
+        author = commit["commit"]["author"]["name"]
+        timestamp_str = commit["commit"]["author"]["date"]
+        # Convert ISO8601 string to datetime and then format as Discord timestamp.
+        dt = datetime.fromisoformat(timestamp_str.rstrip("Z"))
+        formatted_timestamp = f"<t:{int(dt.timestamp())}:F>"
+        commit_reason = commit["commit"]["message"]
+        
+        embed = discord.Embed(
+            title=f"Commit {short_sha}",
+            color=discord.Color.blurple(),
+            description=commit_reason
+        )
+        embed.add_field(name="Author", value=author, inline=True)
+        embed.add_field(name="Timestamp", value=formatted_timestamp, inline=True)
+        embed.add_field(name="Commit ID", value=commit["sha"], inline=False)
+        embed.set_footer(text=f"{self.owner}/{self.repo} - Commit {index + 1} of {len(self.commits)}")
+        return embed
+
+    async def select_callback(self, interaction: discord.Interaction):
+        try:
+            # Get the selected commit index from the select menu.
+            selected_index = int(interaction.data["values"][0])
+            embed = self.get_embed(selected_index)
+            await interaction.response.edit_message(embed=embed, view=self)
+        except Exception as e:
+            await interaction.response.send_message(f"Error processing selection: {e}", ephemeral=True)
+
+
+@bot.tree.command(name="repo_viewer", description="Show a paginated embed with commit details")
+async def repo_viewer(interaction: discord.Interaction, repo: str):
+    """
+    Fetches the 50 most recent commits from the specified repository (using the stored owner or default)
+    and displays an interactive embed. The embed shows:
+      - Commit ID (short and full SHA)
+      - Author
+      - Timestamp (as a Discord timestamp)
+      - Commit Reason (full commit message)
+    Use the select menu (at the bottom) to choose a commit.
+    """
+    await interaction.response.defer()
+
+    guild_id = str(interaction.guild.id)
+    owner_val = owners_data.get(guild_id, default_owner)
+    url = f"https://api.github.com/repos/{owner_val}/{repo}/commits?per_page=50"
+    response = requests.get(url)
+    if response.status_code != 200:
+        await interaction.followup.send(f"Error fetching commits for `{owner_val}/{repo}`")
+        return
+
+    commits = response.json()
+    if not commits:
+        await interaction.followup.send(f"No commits found for `{owner_val}/{repo}`")
+        return
+
+    view = CommitSelectView(commits, owner_val, repo)
+    embed = view.get_embed(0)
+    await interaction.followup.send(embed=embed, view=view)
+
+
+
+# ===============================
+# Slash Command: /details
+# ===============================
+@bot.tree.command(name="details", description="Show details on a repository or a specific commit")
+async def details(interaction: discord.Interaction, repo: str, commit: str = None):
+    await interaction.response.defer()
+
+    guild_id = str(interaction.guild.id)
+    owner_val = owners_data.get(guild_id, default_owner)
+
+    if commit:
+        url = f"https://api.github.com/repos/{owner_val}/{repo}/commits/{commit}"
+        response = requests.get(url)
+        if response.status_code != 200:
+            await interaction.followup.send(f"Error fetching commit details for `{commit}` in `{owner_val}/{repo}`")
+            return
+        data = response.json()
+        commit_message = data["commit"]["message"]
+        author = data["commit"]["author"]["name"]
+        date_str = data["commit"]["author"]["date"]
+        dt = datetime.fromisoformat(date_str.rstrip("Z"))
+        commit_url = data["html_url"]
+
+        embed = discord.Embed(title="Commit Details", color=discord.Color.green())
+        embed.add_field(name="Repository", value=f"{owner_val}/{repo}", inline=False)
+        embed.add_field(name="Author", value=author, inline=True)
+        embed.add_field(name="Date", value=dt.strftime("%Y-%m-%d %H:%M:%S UTC"), inline=True)
+        embed.add_field(name="Message", value=commit_message, inline=False)
+        embed.add_field(name="URL", value=f"[View Commit]({commit_url})", inline=False)
+        await interaction.followup.send(embed=embed)
+    else:
+        url = f"https://api.github.com/repos/{owner_val}/{repo}"
+        response = requests.get(url)
+        if response.status_code != 200:
+            await interaction.followup.send(f"Error fetching repository details for `{owner_val}/{repo}`")
+            return
+        data = response.json()
+        name = data.get("full_name", f"{owner_val}/{repo}")
+        description = data.get("description", "No description available.")
+        stars = data.get("stargazers_count", 0)
+        forks = data.get("forks_count", 0)
+        issues = data.get("open_issues_count", 0)
+        repo_url = data.get("html_url", "")
+
+        embed = discord.Embed(title=f"Repository Details: {name}", url=repo_url, color=discord.Color.purple())
+        embed.add_field(name="Description", value=description, inline=False)
+        embed.add_field(name="Stars", value=str(stars), inline=True)
+        embed.add_field(name="Forks", value=str(forks), inline=True)
+        embed.add_field(name="Open Issues", value=str(issues), inline=True)
+        await interaction.followup.send(embed=embed)
 
 # Run the Flask app in a separate thread
 def start_flask():
