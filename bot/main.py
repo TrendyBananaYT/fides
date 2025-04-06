@@ -6,7 +6,7 @@ from threading import Thread
 from datetime import datetime, timezone
 import requests
 import json
-import io
+import re
 
 # Environment variables and channel/role IDs
 DISCORD_TOKEN = os.getenv("FIDES_TOKEN")
@@ -181,6 +181,58 @@ async def setowner(interaction: discord.Interaction, owner_name: str):
     save_owners()
     await interaction.response.send_message(f"Owner set to `{owner_name}` for this server.", ephemeral=True)
 
+# ===============================
+# Slash Command: /announce
+# ===============================
+
+@bot.tree.command(name="announce", description="Make an embedded announcement in a specified channel.")
+async def announce(
+    interaction: discord.Interaction,
+    channel: discord.TextChannel,
+    title: str = None,
+    description: str = None,
+    fields: str = None,
+    footer: str = None
+):
+    """
+    Sends an embedded announcement to a specified channel.
+
+    Parameters:
+      - channel: The channel where the announcement will be posted.
+      - title: (Optional) The title of the announcement. Literal "\n" will be converted to newlines.
+      - description: (Optional) The main description text. Literal "\n" will be converted to newlines.
+      - fields: (Optional) A string where each field is separated by the delimiter "~\n+~".
+                Each field should be in the format "Field Name:Field Value".
+                Literal "\n" in field names/values will be converted to actual newlines.
+      - footer: (Optional) A footer text for the embed. Literal "\n" will be converted to newlines.
+    """
+    # Replace literal "\n" with actual newline characters in title and description
+    embed = discord.Embed(
+        title=title.replace("\\n", "\n") if title else "",
+        description=description.replace("\\n", "\n") if description else "",
+        color=discord.Color.blurple()
+    )
+    
+    if fields:
+        # Split using a regex that splits on ~ followed by one or more newlines followed by ~
+        field_list = re.split(r'~\n+~', fields)
+        for field in field_list:
+            if ":" in field:
+                name, value = field.split(":", 1)
+                name = name.strip().replace("\\n", "\n")
+                value = value.strip().replace("\\n", "\n")
+                embed.add_field(name=name, value=value, inline=False)
+            else:
+                embed.add_field(name=field.strip().replace("\\n", "\n"), value="\u200b", inline=False)
+    
+    if footer:
+        embed.set_footer(text=footer.replace("\\n", "\n"))
+    
+    await channel.send(embed=embed)
+    await interaction.response.send_message(f"Announcement sent to {channel.mention}", ephemeral=True)
+
+
+
 # -------------------------------
 # Commit Paginator and Selector (Select Menu Only)
 # -------------------------------
@@ -224,7 +276,8 @@ class CommitSelectView(discord.ui.View):
         embed = discord.Embed(
             title=f"Commit {short_sha}",
             color=discord.Color.blurple(),
-            description=commit_reason
+            description=commit_reason,
+            timestamp=datetime.now(timezone.utc)
         )
         # Extract the display name from the commit message
         display_name = commit["commit"]["author"]["name"]
