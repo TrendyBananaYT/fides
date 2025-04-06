@@ -16,7 +16,8 @@ ROLE_ID = 1357602019266789437                   # Role ID to mention
 
 # Global default owner (used if a server hasn't set its owner)
 default_owner = "TrendyBananaYT"
-owners_file = os.path.join(".", "owners.json")
+# Use an absolute path to ensure the JSON file is in the same directory as this script
+owners_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "owners.json")
 owners_data = {}
 
 # Load owners from JSON file at startup
@@ -32,13 +33,17 @@ def load_owners():
                 owners_data = {}
     else:
         owners_data = {}
+        print("No owners file found; starting with an empty owners dictionary.")
 
 # Save owners data to JSON file
 def save_owners():
-    with open(owners_file, "w") as f:
-        json.dump(owners_data, f, indent=4)
-    print(f"Owners data saved to {owners_file}")
-    print(f"Current owners data: {owners_data}")
+    try:
+        with open(owners_file, "w") as f:
+            json.dump(owners_data, f, indent=4)
+        print(f"Owners data saved to {owners_file}")
+        print(f"Current owners data: {owners_data}")
+    except Exception as e:
+        print(f"Error saving owners data: {e}")
 
 load_owners()
 
@@ -177,26 +182,25 @@ async def setowner(interaction: discord.Interaction, owner_name: str):
     await interaction.response.send_message(f"Owner set to `{owner_name}` for this server.", ephemeral=True)
 
 # -------------------------------
-# Commit Paginator and Selector
+# Commit Paginator and Selector (Select Menu Only)
 # -------------------------------
 
 class CommitSelectView(discord.ui.View):
-    def __init__(self, commits, owner, repo):
+    def __init__(self, commits, owner, repo, url):
         super().__init__(timeout=180)
         self.commits = commits
         self.owner = owner
         self.repo = repo
+        self.url = url
 
         # Build options for up to 25 commits (Discord limit)
         options = []
         for i, commit in enumerate(commits[:25]):
             short_sha = commit["sha"][:7]
             message = commit["commit"]["message"].splitlines()[0]
-            # Limit description to 50 characters
             description = message if len(message) <= 50 else message[:47] + "..."
             options.append(discord.SelectOption(label=short_sha, description=description, value=str(i)))
         
-        # Create a select menu with the options and add it to the view.
         select_menu = discord.ui.Select(
             placeholder="Select a commit to view its details...",
             min_values=1,
@@ -212,25 +216,32 @@ class CommitSelectView(discord.ui.View):
         short_sha = commit["sha"][:7]
         author = commit["commit"]["author"]["name"]
         timestamp_str = commit["commit"]["author"]["date"]
-        # Convert ISO8601 string to datetime and then format as Discord timestamp.
         dt = datetime.fromisoformat(timestamp_str.rstrip("Z"))
         formatted_timestamp = f"<t:{int(dt.timestamp())}:F>"
         commit_reason = commit["commit"]["message"]
         
+        # Now using self.url for the commit link.
         embed = discord.Embed(
             title=f"Commit {short_sha}",
             color=discord.Color.blurple(),
             description=commit_reason
         )
-        embed.add_field(name="Author", value=author, inline=True)
+        # Extract the display name from the commit message
+        display_name = commit["commit"]["author"]["name"]
+
+        # Attempt to extract the actual GitHub username; fall back to the display name if not available.
+        actual_username = commit.get("author", {}).get("login", display_name)
+
+        embed.add_field(name="Author", value=f"[{display_name}](https://github.com/{actual_username})", inline=True)
+
         embed.add_field(name="Timestamp", value=formatted_timestamp, inline=True)
-        embed.add_field(name="Commit ID", value=commit["sha"], inline=False)
-        embed.set_footer(text=f"{self.owner}/{self.repo} - Commit {index + 1} of {len(self.commits)}")
+        embed.add_field(name="Commit Sha", value=commit['sha'], inline=False)
+        embed.add_field(name="Commit Link", value=f"[View Commit]({self.url})", inline=False)
+        embed.set_footer(text=f"{self.owner}/{self.repo} - Commit {len(self.commits) - index} of {len(self.commits)}")
         return embed
 
     async def select_callback(self, interaction: discord.Interaction):
         try:
-            # Get the selected commit index from the select menu.
             selected_index = int(interaction.data["values"][0])
             embed = self.get_embed(selected_index)
             await interaction.response.edit_message(embed=embed, view=self)
@@ -264,10 +275,9 @@ async def repo_viewer(interaction: discord.Interaction, repo: str):
         await interaction.followup.send(f"No commits found for `{owner_val}/{repo}`")
         return
 
-    view = CommitSelectView(commits, owner_val, repo)
+    view = CommitSelectView(commits, owner_val, repo, url)
     embed = view.get_embed(0)
     await interaction.followup.send(embed=embed, view=view)
-
 
 
 # ===============================
@@ -296,7 +306,7 @@ async def details(interaction: discord.Interaction, repo: str, commit: str = Non
         embed = discord.Embed(title="Commit Details", color=discord.Color.green())
         embed.add_field(name="Repository", value=f"{owner_val}/{repo}", inline=False)
         embed.add_field(name="Author", value=author, inline=True)
-        embed.add_field(name="Date", value=dt.strftime("%Y-%m-%d %H:%M:%S UTC"), inline=True)
+        embed.add_field(name="Date", value=f"<t:{int(dt.timestamp())}:F>", inline=True)
         embed.add_field(name="Message", value=commit_message, inline=False)
         embed.add_field(name="URL", value=f"[View Commit]({commit_url})", inline=False)
         await interaction.followup.send(embed=embed)
