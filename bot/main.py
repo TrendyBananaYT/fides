@@ -66,11 +66,17 @@ def get_discord_timestamp(dt: datetime) -> str:
     unix_time = int(dt.timestamp())
     return f"<t:{unix_time}:F>"
 
-@app.route("/github", methods=["POST"])
+@app.route("/github", methods=["GET", "POST"])
 def github_webhook():
-    data = request.json
+    if request.method == "GET":
+        # Inform users that this endpoint expects POST requests (e.g., GitHub webhook events)
+        return jsonify({
+            "message": "This endpoint is intended to receive POST requests from GitHub Webhooks."
+        }), 200
 
-    # Handle commit events (push)
+    # For POST requests, proceed with processing the webhook payload
+    data = request.json
+    # --- [rest of your webhook code remains the same] ---
     if "commits" in data:
         for commit in data["commits"]:
             repository_name = data["repository"]["full_name"]
@@ -80,7 +86,7 @@ def github_webhook():
             commit_message = commit["message"]
             commit_url = commit["url"]
             commit_link = f"[View Commit]({commit_url})"
-            
+
             if commit["author"].get("username"):
                 author_link = f"[{commit['author']['name']}](https://github.com/{commit['author']['username']})"
             else:
@@ -102,7 +108,6 @@ def github_webhook():
                 channel_id=COMMITS_CHANNEL_ID
             ))
 
-    # Handle pull request events
     if "pull_request" in data:
         pr = data["pull_request"]
         action = data.get("action")
@@ -149,6 +154,7 @@ def github_webhook():
             ))
 
     return jsonify({"status": "success"}), 200
+
 
 async def send_message_to_discord(event_type, log_details, channel_id):
     channel = bot.get_channel(channel_id)
